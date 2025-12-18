@@ -83,6 +83,24 @@
   font-size: 14px;
 }
 
+.stop-button {
+  margin-left: auto;
+  padding: 6px 16px;
+  background: #ff4444;
+  border: 1px solid #ff4444;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.stop-button:hover {
+  background: #cc0000;
+  border-color: #cc0000;
+}
+
 .stage-loading {
   display: flex;
   align-items: flex-start;

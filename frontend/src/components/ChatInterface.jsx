@@ -9,6 +9,7 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  onStop,
 }) {
   const [input, setInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
@@ -158,6 +159,15 @@ export default function ChatInterface({
           <div className="loading-indicator">
             <div className="spinner"></div>
             <span>Consulting the council...</span>
+            {onStop && (
+              <button
+                className="stop-button"
+                onClick={onStop}
+                title="Stop request"
+              >
+                Stop
+              </button>
+            )}
           </div>
         )}
 

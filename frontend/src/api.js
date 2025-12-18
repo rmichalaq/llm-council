@@ -78,6 +78,22 @@ export const api = {
   },
 
   /**
+   * Delete a conversation.
+   */
+  async deleteConversation(conversationId) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to delete conversation');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message and receive streaming updates.
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content
@@ -85,9 +101,10 @@ export const api = {
    * @param {string[]} selectedAgents - Array of selected agent model IDs
    * @param {string} chairmanModel - Chairman model ID
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
+   * @param {AbortController} abortController - Optional AbortController for cancellation
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, files = [], selectedAgents = [], chairmanModel = null, onEvent) {
+  async sendMessageStream(conversationId, content, files = [], selectedAgents = [], chairmanModel = null, onEvent, abortController = null) {
     const formData = new FormData();
     formData.append('content', content);
     files.forEach((file, index) => {
@@ -105,6 +122,7 @@ export const api = {
       {
         method: 'POST',
         body: formData,
+        signal: abortController?.signal,
       }
     );
 
@@ -115,23 +133,36 @@ export const api = {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const event = JSON.parse(data);
+              onEvent(event.type, event);
+              
+              // Stop reading if cancelled
+              if (event.type === 'cancelled') {
+                return;
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e);
+            }
           }
         }
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        onEvent('cancelled', { message: 'Request cancelled by user' });
+      } else {
+        throw error;
       }
     }
   },

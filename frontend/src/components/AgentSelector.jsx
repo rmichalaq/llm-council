@@ -92,7 +92,7 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
     return 'general';
   };
 
-  // Filter and sort agents
+  // Filter agents based on search
   const filteredAgents = availableAgents.filter(agent => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -127,7 +127,6 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
     coding: '💻 Coding',
     general: '🌟 General Purpose'
   };
-
   return (
     <div className="agent-selector">
       <button

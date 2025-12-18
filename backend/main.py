@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -108,6 +108,15 @@ async def get_conversation(conversation_id: str):
     return conversation
 
 
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    success = storage.delete_conversation(conversation_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"status": "deleted", "conversation_id": conversation_id}
+
+
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
@@ -155,6 +164,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(
     conversation_id: str,
+    request: Request,
     content: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     selected_agents: Optional[str] = Form(None),
@@ -196,6 +206,23 @@ async def send_message_stream(
             "size": len(contents)
         })
 
+    # Create a cancellation event
+    cancelled = asyncio.Event()
+    
+    async def check_disconnect():
+        """Check if client disconnected and set cancellation event."""
+        try:
+            while True:
+                await asyncio.sleep(0.5)  # Check every 500ms
+                if await request.is_disconnected():
+                    cancelled.set()
+                    break
+        except asyncio.CancelledError:
+            pass
+    
+    # Start disconnect checker
+    disconnect_checker = asyncio.create_task(check_disconnect())
+    
     async def event_generator():
         try:
             # Build enhanced query with file content
@@ -270,7 +297,21 @@ async def send_message_stream(
             
             # Use as_completed to track progress as each agent finishes
             for done_task in asyncio.as_completed(tasks):
-                response = await done_task
+                # Check for cancellation
+                if cancelled.is_set():
+                    # Cancel remaining tasks
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Request cancelled by user'})}\n\n"
+                    return
+                
+                try:
+                    response = await done_task
+                except asyncio.CancelledError:
+                    yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Request cancelled'})}\n\n"
+                    return
+                
                 # Find which model this response belongs to
                 model = task_to_model.get(done_task, None)
                 if model and model not in completed_agents:
@@ -283,6 +324,11 @@ async def send_message_stream(
                             "model": model,
                             "response": response.get('content', '')
                         })
+            
+            # Check for cancellation before proceeding
+            if cancelled.is_set():
+                yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Request cancelled by user'})}\n\n"
+                return
             
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
@@ -314,9 +360,18 @@ async def send_message_stream(
             # Send completion event
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
+        except asyncio.CancelledError:
+            yield f"data: {json.dumps({'type': 'cancelled', 'message': 'Request cancelled'})}\n\n"
         except Exception as e:
             # Send error event
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Clean up disconnect checker
+            disconnect_checker.cancel()
+            try:
+                await disconnect_checker
+            except asyncio.CancelledError:
+                pass
 
     return StreamingResponse(
         event_generator(),

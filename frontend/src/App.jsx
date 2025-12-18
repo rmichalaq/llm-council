@@ -14,6 +14,7 @@ function App() {
   const [selectedAgents, setSelectedAgents] = useState([]);
   const [chairmanModel, setChairmanModel] = useState(null);
   const [modelsData, setModelsData] = useState([]);
+  const [abortController, setAbortController] = useState(null);
 
   // Load conversations and agents on mount
   useEffect(() => {
@@ -75,9 +76,28 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleDeleteConversation = async (id) => {
+    try {
+      await api.deleteConversation(id);
+      // Remove from conversations list
+      setConversations(convs => convs.filter(c => c.id !== id));
+      // If deleted conversation was current, clear it
+      if (id === currentConversationId) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      alert('Failed to delete conversation. Please try again.');
+    }
+  };
+
   const handleSendMessage = async (content, files = []) => {
     if (!currentConversationId) return;
 
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    setAbortController(controller);
     setIsLoading(true);
     try {
       // Optimistically add user message to UI
@@ -207,17 +227,30 @@ function App() {
             // Stream complete, reload conversations list
             loadConversations();
             setIsLoading(false);
+            setAbortController(null);
+            break;
+
+          case 'cancelled':
+            console.log('Request cancelled');
+            setIsLoading(false);
+            setAbortController(null);
+            // Remove the incomplete assistant message
+            setCurrentConversation((prev) => ({
+              ...prev,
+              messages: prev.messages.slice(0, -1),
+            }));
             break;
 
           case 'error':
             console.error('Stream error:', event.message);
             setIsLoading(false);
+            setAbortController(null);
             break;
 
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, controller);
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
@@ -226,6 +259,14 @@ function App() {
         messages: prev.messages.slice(0, -2),
       }));
       setIsLoading(false);
+      setAbortController(null);
+    }
+  };
+
+  const handleStop = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
     }
   };
 
@@ -236,6 +277,7 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <div className="main-content">
         <div className="header-bar">
@@ -252,6 +294,7 @@ function App() {
           conversation={currentConversation}
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
+          onStop={isLoading ? handleStop : null}
         />
       </div>
     </div>
