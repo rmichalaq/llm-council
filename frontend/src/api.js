@@ -67,21 +67,44 @@ export const api = {
   },
 
   /**
+   * Get available agents/models.
+   */
+  async getAvailableAgents() {
+    const response = await fetch(`${API_BASE}/api/agents`);
+    if (!response.ok) {
+      throw new Error('Failed to get available agents');
+    }
+    return response.json();
+  },
+
+  /**
    * Send a message and receive streaming updates.
    * @param {string} conversationId - The conversation ID
    * @param {string} content - The message content
+   * @param {File[]} files - Array of files to attach
+   * @param {string[]} selectedAgents - Array of selected agent model IDs
+   * @param {string} chairmanModel - Chairman model ID
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent) {
+  async sendMessageStream(conversationId, content, files = [], selectedAgents = [], chairmanModel = null, onEvent) {
+    const formData = new FormData();
+    formData.append('content', content);
+    files.forEach((file, index) => {
+      formData.append(`file_${index}`, file);
+    });
+    if (selectedAgents.length > 0) {
+      formData.append('selected_agents', JSON.stringify(selectedAgents));
+    }
+    if (chairmanModel) {
+      formData.append('chairman_model', chairmanModel);
+    }
+
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
+        body: formData,
       }
     );
 

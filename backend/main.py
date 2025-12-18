@@ -1,13 +1,14 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
+import base64
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
@@ -17,7 +18,7 @@ app = FastAPI(title="LLM Council API")
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:5177", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +33,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    files: Optional[List[Dict[str, Any]]] = None
 
 
 class ConversationMetadata(BaseModel):
@@ -54,6 +56,16 @@ class Conversation(BaseModel):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.get("/api/agents")
+async def get_available_agents():
+    """Get list of available agents/models."""
+    from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+    return {
+        "agents": COUNCIL_MODELS,
+        "default_chairman": CHAIRMAN_MODEL
+    }
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -124,7 +136,13 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(
+    conversation_id: str,
+    content: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
+    selected_agents: Optional[str] = Form(None),
+    chairman_model: Optional[str] = Form(None)
+):
     """
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
@@ -137,30 +155,70 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Parse selected agents
+    agents_to_use = None
+    chairman_to_use = None
+    if selected_agents:
+        try:
+            agents_to_use = json.loads(selected_agents)
+        except:
+            pass
+    if chairman_model:
+        chairman_to_use = chairman_model
+
+    # Process files
+    file_data = []
+    for file in files:
+        contents = await file.read()
+        # Encode file content as base64 for transmission
+        file_base64 = base64.b64encode(contents).decode('utf-8')
+        file_data.append({
+            "name": file.filename,
+            "content": file_base64,
+            "content_type": file.content_type or "application/octet-stream",
+            "size": len(contents)
+        })
+
     async def event_generator():
         try:
-            # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            # Build enhanced query with file content
+            enhanced_query = content
+            if file_data:
+                file_descriptions = []
+                for f in file_data:
+                    file_descriptions.append(f"File: {f['name']} ({f['content_type']}, {f['size']} bytes)")
+                enhanced_query = f"{content}\n\nAttached files:\n" + "\n".join(file_descriptions)
+                # For text files, include content
+                for f in file_data:
+                    if f['content_type'].startswith('text/'):
+                        try:
+                            file_text = base64.b64decode(f['content']).decode('utf-8', errors='ignore')
+                            enhanced_query += f"\n\n--- Content of {f['name']} ---\n{file_text}"
+                        except:
+                            pass
+
+            # Add user message with file metadata
+            storage.add_user_message(conversation_id, content, file_data)
 
             # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+                title_task = asyncio.create_task(generate_conversation_title(content))
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(enhanced_query, agents_to_use)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(enhanced_query, stage1_results, agents_to_use)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(enhanced_query, stage1_results, stage2_results, chairman_to_use)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started

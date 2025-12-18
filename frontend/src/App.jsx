@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import AgentSelector from './components/AgentSelector';
 import { api } from './api';
 import './App.css';
 
@@ -9,11 +10,26 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState([]);
+  const [selectedAgents, setSelectedAgents] = useState([]);
+  const [chairmanModel, setChairmanModel] = useState(null);
 
-  // Load conversations on mount
+  // Load conversations and agents on mount
   useEffect(() => {
     loadConversations();
+    loadAgents();
   }, []);
+
+  const loadAgents = async () => {
+    try {
+      const agentsData = await api.getAvailableAgents();
+      setAvailableAgents(agentsData.agents);
+      setSelectedAgents(agentsData.agents); // Default to all agents
+      setChairmanModel(agentsData.default_chairman);
+    } catch (error) {
+      console.error('Failed to load agents:', error);
+    }
+  };
 
   // Load conversation details when selected
   useEffect(() => {
@@ -57,13 +73,17 @@ function App() {
     setCurrentConversationId(id);
   };
 
-  const handleSendMessage = async (content) => {
+  const handleSendMessage = async (content, files = []) => {
     if (!currentConversationId) return;
 
     setIsLoading(true);
     try {
       // Optimistically add user message to UI
-      const userMessage = { role: 'user', content };
+      const userMessage = { 
+        role: 'user', 
+        content,
+        files: files.map(f => ({ name: f.name, size: f.size }))
+      };
       setCurrentConversation((prev) => ({
         ...prev,
         messages: [...prev.messages, userMessage],
@@ -90,7 +110,13 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      await api.sendMessageStream(
+        currentConversationId, 
+        content, 
+        files, 
+        selectedAgents.length > 0 ? selectedAgents : availableAgents,
+        chairmanModel,
+        (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -189,11 +215,22 @@ function App() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
       />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        isLoading={isLoading}
-      />
+      <div className="main-content">
+        <div className="header-bar">
+          <AgentSelector
+            availableAgents={availableAgents}
+            selectedAgents={selectedAgents}
+            onSelectionChange={setSelectedAgents}
+            chairmanModel={chairmanModel}
+            onChairmanChange={setChairmanModel}
+          />
+        </div>
+        <ChatInterface
+          conversation={currentConversation}
+          onSendMessage={handleSendMessage}
+          isLoading={isLoading}
+        />
+      </div>
     </div>
   );
 }
