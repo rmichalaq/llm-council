@@ -27,8 +27,38 @@ function App() {
       const agentsData = await api.getAvailableAgents();
       setAvailableAgents(agentsData.agents);
       setModelsData(agentsData.models || []);
-      setSelectedAgents(agentsData.agents); // Default to all agents
-      setChairmanModel(agentsData.default_chairman);
+      
+      // Load saved selections from localStorage
+      const savedSelectedAgents = localStorage.getItem('selectedAgents');
+      const savedChairmanModel = localStorage.getItem('chairmanModel');
+      
+      // Restore saved selections if they exist and are valid
+      if (savedSelectedAgents) {
+        try {
+          const parsed = JSON.parse(savedSelectedAgents);
+          // Filter to only include agents that are still available
+          const validAgents = parsed.filter(agent => agentsData.agents.includes(agent));
+          if (validAgents.length > 0) {
+            setSelectedAgents(validAgents);
+          } else {
+            // If no valid saved agents, default to all
+            setSelectedAgents(agentsData.agents);
+          }
+        } catch (e) {
+          // If parsing fails, default to all agents
+          setSelectedAgents(agentsData.agents);
+        }
+      } else {
+        // No saved selection, default to all agents
+        setSelectedAgents(agentsData.agents);
+      }
+      
+      // Restore saved chairman model if it's still available
+      if (savedChairmanModel && agentsData.agents.includes(savedChairmanModel)) {
+        setChairmanModel(savedChairmanModel);
+      } else {
+        setChairmanModel(agentsData.default_chairman);
+      }
     } catch (error) {
       console.error('Failed to load agents:', error);
     }
@@ -270,6 +300,18 @@ function App() {
     }
   };
 
+  // Save selected agents to localStorage whenever they change
+  const handleAgentSelectionChange = (newSelection) => {
+    setSelectedAgents(newSelection);
+    localStorage.setItem('selectedAgents', JSON.stringify(newSelection));
+  };
+
+  // Save chairman model to localStorage whenever it changes
+  const handleChairmanChange = (newChairman) => {
+    setChairmanModel(newChairman);
+    localStorage.setItem('chairmanModel', newChairman);
+  };
+
   return (
     <div className="app">
       <Sidebar
@@ -284,9 +326,9 @@ function App() {
           <AgentSelector
             availableAgents={availableAgents}
             selectedAgents={selectedAgents}
-            onSelectionChange={setSelectedAgents}
+            onSelectionChange={handleAgentSelectionChange}
             chairmanModel={chairmanModel}
-            onChairmanChange={setChairmanModel}
+            onChairmanChange={handleChairmanChange}
             modelsData={modelsData}
           />
         </div>

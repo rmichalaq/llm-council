@@ -177,8 +177,10 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
                             checked={selectedAgents.includes(agent)}
                             onChange={() => handleAgentToggle(agent)}
                           />
-                          <span className="agent-name">{getDisplayName(agent)}</span>
-                          <span className="agent-id">{agent}</span>
+                          <div className="agent-info">
+                            <div className="agent-name">{getDisplayName(agent)}</div>
+                            <div className="agent-id">{agent}</div>
+                          </div>
                         </label>
                       );
                     })}

@@ -278,7 +278,6 @@ async def send_message_stream(
             yield f"data: {json.dumps({'type': 'stage1_start', 'data': {'total': len(agents_to_use)}})}\n\n"
             
             # Track progress for each agent
-            import asyncio
             from .openrouter import query_model
             
             messages = [{"role": "user", "content": enhanced_query}]
