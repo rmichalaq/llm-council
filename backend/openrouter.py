@@ -77,3 +77,32 @@ async def query_models_parallel(
 
     # Map models to their responses
     return {model: response for model, response in zip(models, responses)}
+
+
+async def get_available_models() -> List[Dict[str, Any]]:
+    """
+    Fetch list of available models from OpenRouter API.
+    
+    Returns:
+        List of model dictionaries with id, name, description, etc.
+    """
+    headers = {}
+    if OPENROUTER_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers=headers
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('data', [])
+            
+    except Exception as e:
+        print(f"Error fetching models from OpenRouter: {e}")
+        # Fallback to default models if API fails
+        from .config import COUNCIL_MODELS
+        return [{"id": model} for model in COUNCIL_MODELS]

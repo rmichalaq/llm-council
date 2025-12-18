@@ -60,12 +60,29 @@ async def root():
 
 @app.get("/api/agents")
 async def get_available_agents():
-    """Get list of available agents/models."""
-    from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
-    return {
-        "agents": COUNCIL_MODELS,
-        "default_chairman": CHAIRMAN_MODEL
-    }
+    """Get list of available agents/models from OpenRouter."""
+    from .openrouter import get_available_models
+    from .config import CHAIRMAN_MODEL
+    
+    try:
+        models = await get_available_models()
+        # Extract model IDs
+        model_ids = [model['id'] for model in models if 'id' in model]
+        
+        return {
+            "agents": model_ids,
+            "models": models,  # Include full model data for frontend
+            "default_chairman": CHAIRMAN_MODEL
+        }
+    except Exception as e:
+        print(f"Error getting agents: {e}")
+        # Fallback to config if API fails
+        from .config import COUNCIL_MODELS
+        return {
+            "agents": COUNCIL_MODELS,
+            "models": [{"id": model} for model in COUNCIL_MODELS],
+            "default_chairman": CHAIRMAN_MODEL
+        }
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -188,14 +205,39 @@ async def send_message_stream(
                 for f in file_data:
                     file_descriptions.append(f"File: {f['name']} ({f['content_type']}, {f['size']} bytes)")
                 enhanced_query = f"{content}\n\nAttached files:\n" + "\n".join(file_descriptions)
-                # For text files, include content
+                
+                # Determine text file extensions
+                text_extensions = {
+                    '.txt', '.md', '.py', '.js', '.jsx', '.ts', '.tsx', '.html', '.css', 
+                    '.json', '.xml', '.yaml', '.yml', '.csv', '.log', '.sh', '.bat', 
+                    '.ps1', '.sql', '.r', '.java', '.cpp', '.c', '.h', '.hpp', '.go',
+                    '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.clj', '.lua',
+                    '.pl', '.pm', '.r', '.m', '.mm', '.dart', '.elm', '.ex', '.exs'
+                }
+                
+                # Include file content for text files or files with text-like extensions
                 for f in file_data:
+                    should_include = False
+                    file_name = f['name'].lower()
+                    
+                    # Check content type
                     if f['content_type'].startswith('text/'):
+                        should_include = True
+                    # Check file extension
+                    elif any(file_name.endswith(ext) for ext in text_extensions):
+                        should_include = True
+                    # Check common text-like content types
+                    elif f['content_type'] in ['application/json', 'application/xml', 'application/javascript']:
+                        should_include = True
+                    
+                    if should_include:
                         try:
                             file_text = base64.b64decode(f['content']).decode('utf-8', errors='ignore')
-                            enhanced_query += f"\n\n--- Content of {f['name']} ---\n{file_text}"
-                        except:
-                            pass
+                            if file_text.strip():  # Only include if there's actual content
+                                enhanced_query += f"\n\n--- Content of {f['name']} ---\n{file_text}"
+                        except Exception as e:
+                            # If decoding fails, try to include a note about the file
+                            enhanced_query += f"\n\n--- Note: Could not read content of {f['name']} (may be binary) ---"
 
             # Add user message with file metadata
             storage.add_user_message(conversation_id, content, file_data)

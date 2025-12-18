@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import './AgentSelector.css';
 
-export default function AgentSelector({ availableAgents, selectedAgents, onSelectionChange, chairmanModel, onChairmanChange }) {
+export default function AgentSelector({ availableAgents, selectedAgents, onSelectionChange, chairmanModel, onChairmanChange, modelsData }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const dropdownRef = useRef(null);
   const toggleRef = useRef(null);
 
@@ -41,11 +42,14 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
   };
 
   const getDisplayName = (modelId) => {
-    // Convert "openai/gpt-5.1" to "GPT 5.1"
+    const modelInfo = modelsData?.find(m => m.id === modelId);
+    if (modelInfo?.name) {
+      return modelInfo.name;
+    }
+    // Fallback: Convert "openai/gpt-5.1" to "GPT 5.1"
     const parts = modelId.split('/');
     if (parts.length > 1) {
       const name = parts[1];
-      // Capitalize first letter and handle common patterns
       return name
         .replace(/^gpt-/, 'GPT ')
         .replace(/^gemini-/, 'Gemini ')
@@ -56,6 +60,16 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
     }
     return modelId;
   };
+
+  // Filter agents based on search
+  const filteredAgents = availableAgents.filter(agent => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    const modelInfo = modelsData?.find(m => m.id === agent);
+    return agent.toLowerCase().includes(query) || 
+           modelInfo?.name?.toLowerCase().includes(query) ||
+           modelInfo?.description?.toLowerCase().includes(query);
+  });
 
   return (
     <div className="agent-selector">
@@ -81,17 +95,31 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
           </div>
 
           <div className="agent-list">
-            {availableAgents.map((agent) => (
-              <label key={agent} className="agent-item">
-                <input
-                  type="checkbox"
-                  checked={selectedAgents.includes(agent)}
-                  onChange={() => handleAgentToggle(agent)}
-                />
-                <span className="agent-name">{getDisplayName(agent)}</span>
-                <span className="agent-id">{agent}</span>
-              </label>
-            ))}
+            <input
+              type="text"
+              placeholder="Search models..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="agent-search-input"
+            />
+            {filteredAgents.length === 0 ? (
+              <div className="no-results">No models found matching "{searchQuery}"</div>
+            ) : (
+              filteredAgents.map((agent) => {
+                const modelInfo = modelsData?.find(m => m.id === agent);
+                return (
+                  <label key={agent} className="agent-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedAgents.includes(agent)}
+                      onChange={() => handleAgentToggle(agent)}
+                    />
+                    <span className="agent-name">{getDisplayName(agent)}</span>
+                    <span className="agent-id">{agent}</span>
+                  </label>
+                );
+              })
+            )}
           </div>
 
           <div className="chairman-selector">
