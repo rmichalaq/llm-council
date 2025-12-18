@@ -107,8 +107,9 @@ export const api = {
   async sendMessageStream(conversationId, content, files = [], selectedAgents = [], chairmanModel = null, onEvent, abortController = null) {
     const formData = new FormData();
     formData.append('content', content);
-    files.forEach((file, index) => {
-      formData.append(`file_${index}`, file);
+    // Append all files with the same field name 'files' so FastAPI can collect them as a list
+    files.forEach((file) => {
+      formData.append('files', file);
     });
     if (selectedAgents.length > 0) {
       formData.append('selected_agents', JSON.stringify(selectedAgents));

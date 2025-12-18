@@ -195,16 +195,22 @@ async def send_message_stream(
 
     # Process files
     file_data = []
+    print(f"Received {len(files)} file(s) in request")
     for file in files:
-        contents = await file.read()
-        # Encode file content as base64 for transmission
-        file_base64 = base64.b64encode(contents).decode('utf-8')
-        file_data.append({
-            "name": file.filename,
-            "content": file_base64,
-            "content_type": file.content_type or "application/octet-stream",
-            "size": len(contents)
-        })
+        try:
+            contents = await file.read()
+            print(f"Processing file: {file.filename}, size: {len(contents)} bytes, content_type: {file.content_type}")
+            # Encode file content as base64 for transmission
+            file_base64 = base64.b64encode(contents).decode('utf-8')
+            file_data.append({
+                "name": file.filename,
+                "content": file_base64,
+                "content_type": file.content_type or "application/octet-stream",
+                "size": len(contents)
+            })
+        except Exception as e:
+            print(f"Error processing file {file.filename}: {e}")
+            # Continue with other files even if one fails
 
     # Create a cancellation event
     cancelled = asyncio.Event()
@@ -239,10 +245,12 @@ async def send_message_stream(
                     '.json', '.xml', '.yaml', '.yml', '.csv', '.log', '.sh', '.bat', 
                     '.ps1', '.sql', '.r', '.java', '.cpp', '.c', '.h', '.hpp', '.go',
                     '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.clj', '.lua',
-                    '.pl', '.pm', '.r', '.m', '.mm', '.dart', '.elm', '.ex', '.exs'
+                    '.pl', '.pm', '.r', '.m', '.mm', '.dart', '.elm', '.ex', '.exs',
+                    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
                 }
                 
                 # Include file content for text files or files with text-like extensions
+                files_included = 0
                 for f in file_data:
                     should_include = False
                     file_name = f['name'].lower()
@@ -254,17 +262,39 @@ async def send_message_stream(
                     elif any(file_name.endswith(ext) for ext in text_extensions):
                         should_include = True
                     # Check common text-like content types
-                    elif f['content_type'] in ['application/json', 'application/xml', 'application/javascript']:
+                    elif f['content_type'] in ['application/json', 'application/xml', 'application/javascript', 'application/x-yaml']:
                         should_include = True
+                    # Try to decode as text for any file if content type is unknown
+                    elif not f['content_type'] or f['content_type'] == 'application/octet-stream':
+                        # Try to decode and see if it's valid UTF-8 text
+                        try:
+                            test_decode = base64.b64decode(f['content']).decode('utf-8', errors='strict')
+                            # If it decodes successfully and looks like text, include it
+                            if test_decode.strip() and len(test_decode) > 0:
+                                should_include = True
+                        except:
+                            pass
                     
                     if should_include:
                         try:
                             file_text = base64.b64decode(f['content']).decode('utf-8', errors='ignore')
                             if file_text.strip():  # Only include if there's actual content
                                 enhanced_query += f"\n\n--- Content of {f['name']} ---\n{file_text}"
+                                files_included += 1
+                            else:
+                                enhanced_query += f"\n\n--- Note: File {f['name']} appears to be empty ---"
                         except Exception as e:
-                            # If decoding fails, try to include a note about the file
-                            enhanced_query += f"\n\n--- Note: Could not read content of {f['name']} (may be binary) ---"
+                            # If decoding fails, include a note about the file
+                            enhanced_query += f"\n\n--- Note: Could not read content of {f['name']} (error: {str(e)}) ---"
+                    else:
+                        enhanced_query += f"\n\n--- Note: File {f['name']} ({f['content_type']}) appears to be binary or unsupported format. Content not included. ---"
+                
+                # Add summary if files were processed
+                if files_included > 0:
+                    enhanced_query += f"\n\n[Note: {files_included} file(s) content included above]"
+                else:
+                    print(f"Warning: No file content was included for {len(file_data)} file(s)")
+                    enhanced_query += f"\n\n[Warning: File content could not be extracted. Please ensure files are text-based or provide file contents directly in your message.]"
 
             # Add user message with file metadata
             storage.add_user_message(conversation_id, content, file_data)
