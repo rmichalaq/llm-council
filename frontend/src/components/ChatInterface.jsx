@@ -103,7 +103,24 @@ export default function ChatInterface({
                   {msg.loading?.stage1 && (
                     <div className="stage-loading">
                       <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
+                      <div className="stage-progress-info">
+                        <span>Running Stage 1: Collecting individual responses...</span>
+                        {msg.stage1Progress && (
+                          <div className="progress-details">
+                            <span className="progress-text">
+                              {msg.stage1Progress.completed} / {msg.stage1Progress.total} agents completed
+                            </span>
+                            {msg.stage1Progress.completedAgents.length > 0 && (
+                              <div className="completed-agents">
+                                Completed: {msg.stage1Progress.completedAgents.map(model => {
+                                  const parts = model.split('/');
+                                  return parts[parts.length - 1];
+                                }).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                   {msg.stage1 && <Stage1 responses={msg.stage1} />}

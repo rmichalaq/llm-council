@@ -13,6 +13,7 @@ function App() {
   const [availableAgents, setAvailableAgents] = useState([]);
   const [selectedAgents, setSelectedAgents] = useState([]);
   const [chairmanModel, setChairmanModel] = useState(null);
+  const [modelsData, setModelsData] = useState([]);
 
   // Load conversations and agents on mount
   useEffect(() => {
@@ -24,6 +25,7 @@ function App() {
     try {
       const agentsData = await api.getAvailableAgents();
       setAvailableAgents(agentsData.agents);
+      setModelsData(agentsData.models || []);
       setSelectedAgents(agentsData.agents); // Default to all agents
       setChairmanModel(agentsData.default_chairman);
     } catch (error) {
@@ -123,6 +125,26 @@ function App() {
               const messages = [...prev.messages];
               const lastMsg = messages[messages.length - 1];
               lastMsg.loading.stage1 = true;
+              lastMsg.stage1Progress = {
+                total: event.data?.total || 0,
+                completed: 0,
+                completedAgents: []
+              };
+              return { ...prev, messages };
+            });
+            break;
+
+          case 'stage1_progress':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg.stage1Progress) {
+                lastMsg.stage1Progress = {
+                  total: event.data.total,
+                  completed: event.data.completed,
+                  completedAgents: event.data.completed_agents || []
+                };
+              }
               return { ...prev, messages };
             });
             break;
@@ -223,6 +245,7 @@ function App() {
             onSelectionChange={setSelectedAgents}
             chairmanModel={chairmanModel}
             onChairmanChange={setChairmanModel}
+            modelsData={modelsData}
           />
         </div>
         <ChatInterface

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import './AgentSelector.css';
 
-export default function AgentSelector({ availableAgents, selectedAgents, onSelectionChange, chairmanModel, onChairmanChange }) {
+export default function AgentSelector({ availableAgents, selectedAgents, onSelectionChange, chairmanModel, onChairmanChange, modelsData }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const dropdownRef = useRef(null);
   const toggleRef = useRef(null);
 
@@ -41,11 +42,14 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
   };
 
   const getDisplayName = (modelId) => {
-    // Convert "openai/gpt-5.1" to "GPT 5.1"
+    const modelInfo = modelsData?.find(m => m.id === modelId);
+    if (modelInfo?.name) {
+      return modelInfo.name;
+    }
+    // Fallback: Convert "openai/gpt-5.1" to "GPT 5.1"
     const parts = modelId.split('/');
     if (parts.length > 1) {
       const name = parts[1];
-      // Capitalize first letter and handle common patterns
       return name
         .replace(/^gpt-/, 'GPT ')
         .replace(/^gemini-/, 'Gemini ')
@@ -55,6 +59,73 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
         .replace(/\b\w/g, l => l.toUpperCase());
     }
     return modelId;
+  };
+
+  // Categorize models by their strengths
+  const getModelStrength = (modelId, modelInfo) => {
+    const idLower = modelId.toLowerCase();
+    const nameLower = (modelInfo?.name || '').toLowerCase();
+    const descLower = (modelInfo?.description || '').toLowerCase();
+    const combined = `${idLower} ${nameLower} ${descLower}`;
+
+    // Reasoning models
+    if (combined.includes('reasoning') || 
+        combined.includes('o1') || 
+        combined.includes('deepseek-r') ||
+        combined.includes('qwen-reasoning') ||
+        combined.includes('deepseek-reasoner')) {
+      return 'reasoning';
+    }
+
+    // Coding models
+    if (combined.includes('code') || 
+        combined.includes('coder') ||
+        combined.includes('codellama') ||
+        combined.includes('deepseek-coder') ||
+        combined.includes('wizardcoder') ||
+        combined.includes('starcoder') ||
+        combined.includes('codegen')) {
+      return 'coding';
+    }
+
+    // Default to general
+    return 'general';
+  };
+
+  // Filter and sort agents
+  const filteredAgents = availableAgents.filter(agent => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    const modelInfo = modelsData?.find(m => m.id === agent);
+    return agent.toLowerCase().includes(query) || 
+           modelInfo?.name?.toLowerCase().includes(query) ||
+           modelInfo?.description?.toLowerCase().includes(query);
+  });
+
+  // Sort alphabetically by display name
+  const sortedAgents = [...filteredAgents].sort((a, b) => {
+    const nameA = getDisplayName(a).toLowerCase();
+    const nameB = getDisplayName(b).toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  // Group by strength
+  const groupedAgents = sortedAgents.reduce((groups, agent) => {
+    const modelInfo = modelsData?.find(m => m.id === agent);
+    const strength = getModelStrength(agent, modelInfo);
+    if (!groups[strength]) {
+      groups[strength] = [];
+    }
+    groups[strength].push(agent);
+    return groups;
+  }, {});
+
+  // Define strength order and labels
+  const strengthOrder = ['reasoning', 'coding', 'general'];
+  const strengthLabels = {
+    reasoning: '🧠 Reasoning',
+    coding: '💻 Coding',
+    general: '🌟 General Purpose'
   };
 
   return (
@@ -81,17 +152,41 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
           </div>
 
           <div className="agent-list">
-            {availableAgents.map((agent) => (
-              <label key={agent} className="agent-item">
-                <input
-                  type="checkbox"
-                  checked={selectedAgents.includes(agent)}
-                  onChange={() => handleAgentToggle(agent)}
-                />
-                <span className="agent-name">{getDisplayName(agent)}</span>
-                <span className="agent-id">{agent}</span>
-              </label>
-            ))}
+            <input
+              type="text"
+              placeholder="Search models..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="agent-search-input"
+            />
+            {sortedAgents.length === 0 ? (
+              <div className="no-results">No models found matching "{searchQuery}"</div>
+            ) : (
+              strengthOrder.map(strength => {
+                const agentsInGroup = groupedAgents[strength] || [];
+                if (agentsInGroup.length === 0) return null;
+                
+                return (
+                  <div key={strength} className="strength-group">
+                    <div className="strength-group-header">{strengthLabels[strength]}</div>
+                    {agentsInGroup.map((agent) => {
+                      const modelInfo = modelsData?.find(m => m.id === agent);
+                      return (
+                        <label key={agent} className="agent-item">
+                          <input
+                            type="checkbox"
+                            checked={selectedAgents.includes(agent)}
+                            onChange={() => handleAgentToggle(agent)}
+                          />
+                          <span className="agent-name">{getDisplayName(agent)}</span>
+                          <span className="agent-id">{agent}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })
+            )}
           </div>
 
           <div className="chairman-selector">
@@ -101,7 +196,7 @@ export default function AgentSelector({ availableAgents, selectedAgents, onSelec
               onChange={(e) => onChairmanChange(e.target.value)}
               className="chairman-select"
             >
-              {availableAgents.map((agent) => (
+              {sortedAgents.map((agent) => (
                 <option key={agent} value={agent}>
                   {getDisplayName(agent)}
                 </option>

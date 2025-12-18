@@ -5,17 +5,25 @@ from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
-async def stage1_collect_responses(user_query: str, agents: List[str] = None) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(
+    user_query: str, 
+    agents: List[str] = None,
+    progress_callback = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
         agents: Optional list of agent model IDs to use. If None, uses COUNCIL_MODELS.
+        progress_callback: Optional callback function(model, completed_count, total_count) for progress updates
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
+    import asyncio
+    from .openrouter import query_model
+    
     messages = [{"role": "user", "content": user_query}]
 
     # Use provided agents or default to COUNCIL_MODELS
@@ -24,8 +32,23 @@ async def stage1_collect_responses(user_query: str, agents: List[str] = None) ->
     if not models_to_use:
         return []
 
-    # Query all models in parallel
-    responses = await query_models_parallel(models_to_use, messages)
+    # Query all models in parallel, tracking progress
+    tasks = {model: query_model(model, messages) for model in models_to_use}
+    responses = {}
+    completed_count = 0
+    total_count = len(models_to_use)
+    
+    # Use as_completed to track progress as each completes
+    for coro in asyncio.as_completed(tasks.values()):
+        response = await coro
+        # Find which model this response belongs to
+        for model, task in tasks.items():
+            if task.done():
+                responses[model] = response
+                completed_count += 1
+                if progress_callback:
+                    progress_callback(model, completed_count, total_count)
+                break
 
     # Format results
     stage1_results = []
